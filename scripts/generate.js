@@ -1,19 +1,46 @@
-// scripts/generate.js
 import fs from 'fs';
+import path from 'path';
 
-const request = JSON.parse(fs.readFileSync('request.json', 'utf-8'));
-const round = request.round || 1;
+// Read request.json
+const requestPath = path.join(process.cwd(), 'request.json');
+const request = JSON.parse(fs.readFileSync(requestPath, 'utf-8'));
 
-console.log(`Generating files for task: ${request.task}, round: ${round}`);
+console.log('Generating files for task:', request.task);
 
-// Example: create index.html
-fs.writeFileSync('index.html', `<h1>${request.brief}</h1>`);
+// 1️⃣ Generate index.html
+const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>${request.brief}</title>
+</head>
+<body>
+  <h1>${request.brief}</h1>
+  <p>Round: ${request.round}</p>
+</body>
+</html>
+`;
+fs.writeFileSync('index.html', htmlContent);
+console.log('✅ index.html created');
 
-// Example: create README.md
-fs.writeFileSync('README.md', `# ${request.task}\n\nRound: ${round}\n\n${request.brief}`);
+// 2️⃣ Generate README.md
+const readmeContent = `# ${request.task}
 
-// Example: create LICENSE
-fs.writeFileSync('LICENSE', 'MIT License');
+Brief: ${request.brief}  
+Round: ${request.round}  
+Student Email: ${request.email}
+`;
+fs.writeFileSync('README.md', readmeContent);
+console.log('✅ README.md created');
 
-// Done
-console.log('Files generated successfully!');
+// 3️⃣ Generate LICENSE (MIT)
+const licenseContent = `MIT License
+
+Copyright (c) ${(new Date()).getFullYear()}
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files...
+`;
+fs.writeFileSync('LICENSE', licenseContent);
+console.log('✅ LICENSE created');

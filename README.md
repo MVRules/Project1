@@ -1,5 +1,5 @@
 # Quiz APP
 
-Round: 1
-
-ask whether 1 is greater or 2
+Brief: ask whether 1 is greater or 2  
+Round: 1  
+Student Email: manishvashisht291@gmail.com
