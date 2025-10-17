@@ -1,8 +1,8 @@
-name: Build and Deploy App
+name: Build & Deploy via OpenAI
 
 on:
   repository_dispatch:
-    types: [build_app]
+    types: [build_app, revise_app]
 
 jobs:
   build:
@@ -12,38 +12,96 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Parse request payload
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Save request payload
         run: |
-          echo "📦 Incoming payload:"
           echo '${{ toJson(github.event.client_payload) }}' > request.json
           cat request.json
 
       - name: Verify secret
         run: |
-          SECRET_FROM_REQ=$(jq -r '.secret' request.json)
-          if [ "$SECRET_FROM_REQ" != "${{ secrets.BUILD_SECRET }}" ]; then
-            echo "❌ Invalid secret"
+          SECRET_REQ=$(jq -r '.secret' request.json)
+          if [ "$SECRET_REQ" != "${{ secrets.BUILD_SECRET }}" ]; then
+            echo "❌ Secret mismatch"
             exit 1
           fi
           echo "✅ Secret verified"
 
-      - name: Build with OpenAI (placeholder)
+      - name: Install dependencies
+        run: npm install openai
+
+      - name: Run generator (OpenAI) to produce files
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          BRIEF=$(jq -r '.brief' request.json)
-          echo "🧠 Building app for brief: $BRIEF"
-          mkdir app
-          echo "<h1>$BRIEF</h1>" > app/index.html
-          echo "✅ Build complete"
+          node << 'EOF'
+          import fs from 'fs';
+          import { OpenAI } from 'openai';
+          const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+          const req = JSON.parse(fs.readFileSync('request.json', 'utf-8'));
+          const brief = req.brief;
+          const round = req.round;
+
+          const prompt = `
+You are a code generator. Task: ${req.task}
+Brief: ${brief}
+Round: ${round}
+
+Produce a JSON mapping filenames to file content. E.g.:
+{
+  "index.html": "...",
+  "script.js": "...",
+  "style.css": "..."
+}
+`;
+
+          (async () => {
+            const resp = await client.chat.completions.create({
+              model: "gpt-4o-mini",
+              messages: [{ role: "user", content: prompt }],
+              temperature: 0.2
+            });
+            let files;
+            try {
+              files = JSON.parse(resp.choices[0].message.content);
+            } catch (e) {
+              console.error("Failed parse JSON:", resp.choices[0].message.content);
+              files = {
+                "index.html": `<html><body><pre>${brief}</pre></body></html>`
+              };
+            }
+
+            // Write files
+            for (const [fname, content] of Object.entries(files)) {
+              fs.writeFileSync(fname, content, "utf-8");
+            }
+            // Also ensure README & LICENSE
+            const readme = `# ${req.task}\n\n**Brief:** ${brief}\n\nRound ${round}\n`;
+            fs.writeFileSync("README.md", readme, "utf-8");
+            fs.writeFileSync("LICENSE", "MIT License\n", "utf-8");
+          })();
+          EOF
+
+      - name: Commit & push generated files
+        run: |
+          git config user.name "github-actions"
+          git config user.email "action@github.com"
+          git add .
+          git commit -m "Auto generate for round ${{ github.event.client_payload.round }}" || echo "No changes"
+          git push origin HEAD
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./app
+          publish_dir: ./
 
-      - name: Send evaluation result
+      - name: Send evaluation POST
         run: |
           EMAIL=$(jq -r '.email' request.json)
           TASK=$(jq -r '.task' request.json)
@@ -51,18 +109,18 @@ jobs:
           NONCE=$(jq -r '.nonce' request.json)
           EVAL_URL=$(jq -r '.evaluation_url' request.json)
           REPO_URL="https://github.com/${{ github.repository }}"
-          COMMIT_SHA="${{ github.sha }}"
+          COMMIT_SHA=$(git rev-parse HEAD)
           PAGES_URL="https://${{ github.repository_owner }}.github.io/$(basename $REPO_URL)/"
 
           DATA=$(jq -n \
             --arg email "$EMAIL" \
             --arg task "$TASK" \
-            --arg round "$ROUND" \
+            --argjson round "$ROUND" \
             --arg nonce "$NONCE" \
             --arg repo_url "$REPO_URL" \
             --arg commit_sha "$COMMIT_SHA" \
             --arg pages_url "$PAGES_URL" \
-            '{email: $email, task: $task, round: ($round | tonumber), nonce: $nonce, repo_url: $repo_url, commit_sha: $commit_sha, pages_url: $pages_url}')
+            '{email: $email, task: $task, round: $round, nonce: $nonce, repo_url: $repo_url, commit_sha: $commit_sha, pages_url: $pages_url}')
 
-          echo "📤 Sending result to $EVAL_URL"
+          echo "📬 Notifying evaluator..."
           curl -X POST -H "Content-Type: application/json" -d "$DATA" "$EVAL_URL"
