@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout repo with full history
+      # 1️⃣ Checkout repo
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
@@ -65,13 +65,13 @@ jobs:
       - name: Install dependencies
         run: npm install openai@^4.0.0
 
-      # 5️⃣ Run your generator script
+      # 5️⃣ Run generator
       - name: Run OpenAI generator
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: node scripts/generate.js
 
-      # 6️⃣ Commit & push generated files using PAT
+      # 6️⃣ Commit & push using PAT
       - name: Commit & push
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
@@ -89,6 +89,8 @@ jobs:
           github_token: ${{ secrets.GH_PAT }}
           publish_dir: ./
           publish_branch: gh-pages
+          user_name: github-actions
+          user_email: action@github.com
 
       # 8️⃣ Send evaluation POST with retry
       - name: Send evaluation POST with retry
