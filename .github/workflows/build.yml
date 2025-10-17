@@ -31,68 +31,97 @@ jobs:
           fi
           echo "✅ Secret verified"
 
-      - name: Install dependencies
-        run: npm install openai
-
-      - name: Run generator (OpenAI) to produce files
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - name: Create generator script
         run: |
-          node << 'EOF'
-          import fs from 'fs';
-          import { OpenAI } from 'openai';
-          const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+          mkdir -p scripts
+          cat > scripts/generate.js <<'NODE'
+import fs from 'fs';
+import { OpenAI } from 'openai';
 
-          const req = JSON.parse(fs.readFileSync('request.json', 'utf-8'));
-          const brief = req.brief;
-          const round = req.round;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+if (!OPENAI_API_KEY) {
+  console.error("Missing OPENAI_API_KEY");
+  process.exit(2);
+}
+const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-          const prompt = `
-You are a code generator. Task: ${req.task}
-Brief: ${brief}
+async function main() {
+  const req = JSON.parse(fs.readFileSync('request.json', 'utf-8'));
+  const brief = req.brief || "(no brief)";
+  const round = req.round || 1;
+  const task = req.task || "task";
+
+  const prompt = `
+You are a code generator. Produce a JSON object mapping filenames to file contents (strings).
+Task: ${task}
 Round: ${round}
+Brief: ${brief}
 
-Produce a JSON mapping filenames to file content. E.g.:
+Return only valid JSON. Example:
 {
-  "index.html": "...",
-  "script.js": "...",
-  "style.css": "..."
+  "index.html": "<!doctype html>...",
+  "script.js": "console.log('hi')"
 }
 `;
 
-          (async () => {
-            const resp = await client.chat.completions.create({
-              model: "gpt-4o-mini",
-              messages: [{ role: "user", content: prompt }],
-              temperature: 0.2
-            });
-            let files;
-            try {
-              files = JSON.parse(resp.choices[0].message.content);
-            } catch (e) {
-              console.error("Failed parse JSON:", resp.choices[0].message.content);
-              files = {
-                "index.html": `<html><body><pre>${brief}</pre></body></html>`
-              };
-            }
+  try {
+    const resp = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.2,
+      max_tokens: 1500
+    });
 
-            // Write files
-            for (const [fname, content] of Object.entries(files)) {
-              fs.writeFileSync(fname, content, "utf-8");
-            }
-            // Also ensure README & LICENSE
-            const readme = `# ${req.task}\n\n**Brief:** ${brief}\n\nRound ${round}\n`;
-            fs.writeFileSync("README.md", readme, "utf-8");
-            fs.writeFileSync("LICENSE", "MIT License\n", "utf-8");
-          })();
-          EOF
+    const text = resp.choices?.[0]?.message?.content || "";
+    let files = null;
+    try {
+      files = JSON.parse(text);
+    } catch (e) {
+      console.error("Failed to parse JSON from model. Falling back to a minimal file. Model output:");
+      console.error(text);
+      files = {
+        "index.html": `<html><body><h1>${task}</h1><pre>${brief}</pre></body></html>`
+      };
+    }
+
+    // Write files
+    for (const [fname, content] of Object.entries(files)) {
+      fs.mkdirSync(require('path').dirname(fname), { recursive: true });
+      fs.writeFileSync(fname, content, "utf-8");
+      console.log("Wrote", fname);
+    }
+
+    // Ensure README & LICENSE exist / update
+    const readme = `# ${task}\n\n**Brief:** ${brief}\n\nRound ${round}\n`;
+    fs.writeFileSync("README.md", readme, "utf-8");
+    if (!fs.existsSync("LICENSE")) {
+      fs.writeFileSync("LICENSE", "MIT License\n", "utf-8");
+    }
+
+    console.log("Generator finished.");
+  } catch (err) {
+    console.error("Generator error:", err);
+    process.exit(3);
+  }
+}
+
+main();
+NODE
+
+      - name: Install dependencies
+        run: npm install openai@^4.0.0
+
+      - name: Run generator (OpenAI)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: node scripts/generate.js
 
       - name: Commit & push generated files
         run: |
           git config user.name "github-actions"
           git config user.email "action@github.com"
           git add .
-          git commit -m "Auto generate for round ${{ github.event.client_payload.round }}" || echo "No changes"
+          git commit -m "Auto generate for round ${{ github.event.client_payload.round }}" || echo "No changes to commit"
           git push origin HEAD
 
       - name: Deploy to GitHub Pages
@@ -101,16 +130,17 @@ Produce a JSON mapping filenames to file content. E.g.:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./
 
-      - name: Send evaluation POST
+      - name: Send evaluation POST (with retries)
+        env:
+          EVAL_URL: ${{ fromJson(toJson(github.event.client_payload)).evaluation_url }}
         run: |
           EMAIL=$(jq -r '.email' request.json)
           TASK=$(jq -r '.task' request.json)
           ROUND=$(jq -r '.round' request.json)
           NONCE=$(jq -r '.nonce' request.json)
-          EVAL_URL=$(jq -r '.evaluation_url' request.json)
           REPO_URL="https://github.com/${{ github.repository }}"
           COMMIT_SHA=$(git rev-parse HEAD)
-          PAGES_URL="https://${{ github.repository_owner }}.github.io/$(basename $REPO_URL)/"
+          PAGES_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
 
           DATA=$(jq -n \
             --arg email "$EMAIL" \
@@ -122,5 +152,26 @@ Produce a JSON mapping filenames to file content. E.g.:
             --arg pages_url "$PAGES_URL" \
             '{email: $email, task: $task, round: $round, nonce: $nonce, repo_url: $repo_url, commit_sha: $commit_sha, pages_url: $pages_url}')
 
-          echo "📬 Notifying evaluator..."
-          curl -X POST -H "Content-Type: application/json" -d "$DATA" "$EVAL_URL"
+          echo "Payload to evaluator:"
+          echo "$DATA"
+
+          # Retry loop: 1,2,4,8,16 seconds (5 attempts)
+          ATTEMPTS=5
+          DELAY=1
+          i=1
+          while [ $i -le $ATTEMPTS ]; do
+            echo "Attempt $i to POST to $EVAL_URL"
+            HTTP_CODE=$(curl -s -o /dev/stderr -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$DATA" "$EVAL_URL" || echo "000")
+            echo "HTTP code: $HTTP_CODE"
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Evaluator acknowledged (200)."
+              exit 0
+            fi
+            echo "Not 200. Sleeping $DELAY seconds before retry..."
+            sleep $DELAY
+            DELAY=$((DELAY * 2))
+            i=$((i + 1))
+          done
+
+          echo "Failed to notify evaluator after $ATTEMPTS attempts."
+          exit 1
