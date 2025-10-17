@@ -1,5 +1,5 @@
-# Quiz APP
+# quizlet
 
-Brief: ask whether 1 is greater or 2  
+Brief: a or b  
 Round: 1  
-Student Email: manish.vashisht12@gmail.com
+Student Email: abc@gmail.com
