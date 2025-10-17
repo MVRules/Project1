@@ -3,6 +3,27 @@ name: Build & Deploy via OpenAI
 on:
   repository_dispatch:
     types: [build_app, revise_app]
+  workflow_dispatch:
+    inputs:
+      email:
+        description: 'Student email'
+        required: true
+      secret:
+        description: 'Your BUILD_SECRET'
+        required: true
+      task:
+        description: 'Task name'
+        required: true
+      round:
+        description: 'Round number'
+        required: true
+        default: '1'
+      brief:
+        description: 'App brief'
+        required: true
+      evaluation_url:
+        description: 'Evaluation endpoint URL'
+        required: true
 
 jobs:
   build:
@@ -19,7 +40,22 @@ jobs:
 
       - name: Save request payload
         run: |
-          echo '${{ toJson(github.event.client_payload) }}' > request.json
+          # Detect whether triggered via workflow_dispatch or repository_dispatch
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Workflow dispatch payload"
+            cat > request.json <<EOF
+{
+  "email": "${{ github.event.inputs.email }}",
+  "secret": "${{ github.event.inputs.secret }}",
+  "task": "${{ github.event.inputs.task }}",
+  "round": ${{ github.event.inputs.round }},
+  "brief": "${{ github.event.inputs.brief }}",
+  "evaluation_url": "${{ github.event.inputs.evaluation_url }}"
+}
+EOF
+          else
+            echo '${{ toJson(github.event.client_payload) }}' > request.json
+          fi
           cat request.json
 
       - name: Verify secret
@@ -44,7 +80,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "action@github.com"
           git add .
-          git commit -m "Auto generate for round ${{ github.event.client_payload.round }}" || echo "No changes to commit"
+          git commit -m "Auto generate for round ${{ github.event.inputs.round }}" || echo "No changes to commit"
           git push origin HEAD
 
       - name: Deploy to GitHub Pages
@@ -58,7 +94,7 @@ jobs:
           EMAIL=$(jq -r '.email' request.json)
           TASK=$(jq -r '.task' request.json)
           ROUND=$(jq -r '.round' request.json)
-          NONCE=$(jq -r '.nonce' request.json)
+          NONCE=$(jq -r '.nonce // "manual"' request.json)
           EVAL_URL=$(jq -r '.evaluation_url' request.json)
           REPO_URL="https://github.com/${{ github.repository }}"
           COMMIT_SHA=$(git rev-parse HEAD)
@@ -73,6 +109,9 @@ jobs:
             --arg commit_sha "$COMMIT_SHA" \
             --arg pages_url "$PAGES_URL" \
             '{email: $email, task: $task, round: $round, nonce: $nonce, repo_url: $repo_url, commit_sha: $commit_sha, pages_url: $pages_url}')
+
+          echo "Payload to evaluator:"
+          echo "$DATA"
 
           ATTEMPTS=5
           DELAY=1
