@@ -1,0 +1,68 @@
+name: Build and Deploy App
+
+on:
+  repository_dispatch:
+    types: [build_app]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Parse request payload
+        run: |
+          echo "📦 Incoming payload:"
+          echo '${{ toJson(github.event.client_payload) }}' > request.json
+          cat request.json
+
+      - name: Verify secret
+        run: |
+          SECRET_FROM_REQ=$(jq -r '.secret' request.json)
+          if [ "$SECRET_FROM_REQ" != "${{ secrets.BUILD_SECRET }}" ]; then
+            echo "❌ Invalid secret"
+            exit 1
+          fi
+          echo "✅ Secret verified"
+
+      - name: Build with OpenAI (placeholder)
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          BRIEF=$(jq -r '.brief' request.json)
+          echo "🧠 Building app for brief: $BRIEF"
+          mkdir app
+          echo "<h1>$BRIEF</h1>" > app/index.html
+          echo "✅ Build complete"
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./app
+
+      - name: Send evaluation result
+        run: |
+          EMAIL=$(jq -r '.email' request.json)
+          TASK=$(jq -r '.task' request.json)
+          ROUND=$(jq -r '.round' request.json)
+          NONCE=$(jq -r '.nonce' request.json)
+          EVAL_URL=$(jq -r '.evaluation_url' request.json)
+          REPO_URL="https://github.com/${{ github.repository }}"
+          COMMIT_SHA="${{ github.sha }}"
+          PAGES_URL="https://${{ github.repository_owner }}.github.io/$(basename $REPO_URL)/"
+
+          DATA=$(jq -n \
+            --arg email "$EMAIL" \
+            --arg task "$TASK" \
+            --arg round "$ROUND" \
+            --arg nonce "$NONCE" \
+            --arg repo_url "$REPO_URL" \
+            --arg commit_sha "$COMMIT_SHA" \
+            --arg pages_url "$PAGES_URL" \
+            '{email: $email, task: $task, round: ($round | tonumber), nonce: $nonce, repo_url: $repo_url, commit_sha: $commit_sha, pages_url: $pages_url}')
+
+          echo "📤 Sending result to $EVAL_URL"
+          curl -X POST -H "Content-Type: application/json" -d "$DATA" "$EVAL_URL"
