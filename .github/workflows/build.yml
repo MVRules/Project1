@@ -40,19 +40,9 @@ jobs:
 
       - name: Save request payload
         run: |
-          # Detect whether triggered via workflow_dispatch or repository_dispatch
+          # Detect trigger type
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "Workflow dispatch payload"
-            cat > request.json <<EOF
-{
-  "email": "${{ github.event.inputs.email }}",
-  "secret": "${{ github.event.inputs.secret }}",
-  "task": "${{ github.event.inputs.task }}",
-  "round": ${{ github.event.inputs.round }},
-  "brief": "${{ github.event.inputs.brief }}",
-  "evaluation_url": "${{ github.event.inputs.evaluation_url }}"
-}
-EOF
+            echo "{\"email\": \"${{ github.event.inputs.email }}\", \"secret\": \"${{ github.event.inputs.secret }}\", \"task\": \"${{ github.event.inputs.task }}\", \"round\": ${{ github.event.inputs.round }}, \"brief\": \"${{ github.event.inputs.brief }}\", \"evaluation_url\": \"${{ github.event.inputs.evaluation_url }}\"}" > request.json
           else
             echo '${{ toJson(github.event.client_payload) }}' > request.json
           fi
