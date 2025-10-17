@@ -1,0 +1,39 @@
+name: Build and Deploy Student App
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_json:
+        description: "Paste full JSON request payload"
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BUILD_SECRET: ${{ secrets.BUILD_SECRET }}
+      GITHUB_USER: ${{ github.repository_owner }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Save request input to file
+        run: |
+          echo '${{ github.event.inputs.request_json }}' > request.json
+          cat request.json
+
+      - name: Run build pipeline
+        run: |
+          node scripts/handle_request.js request.json
