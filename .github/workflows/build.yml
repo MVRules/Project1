@@ -26,9 +26,9 @@ on:
         required: true
 
 permissions:
-  contents: write      # ✅ allow commits and pushes
-  pages: write         # ✅ allow GitHub Pages deployment
-  id-token: write      # ✅ required for peaceiris/actions-gh-pages v4
+  contents: write      # ✅ allows committing/pushing code
+  pages: write         # ✅ allows GitHub Pages deployment
+  id-token: write      # ✅ required for gh-pages v4
 
 jobs:
   build:
@@ -67,22 +67,22 @@ jobs:
         with:
           node-version: 20
 
+      # 5️⃣ Install dependencies
       - name: Install dependencies
         run: npm install openai@^4.0.0
 
-      # 5️⃣ Run generator
+      # 6️⃣ Run OpenAI generator
       - name: Run OpenAI generator
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: node scripts/generate.js
 
-      # 6️⃣ Commit & push using built-in GITHUB_TOKEN
+      # 7️⃣ Commit & push generated files
       - name: Commit & push
         run: |
           git config user.name "github-actions"
           git config user.email "action@github.com"
           git add .
-
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
@@ -90,17 +90,7 @@ jobs:
             git push "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:main
           fi
 
-      # 7️⃣ Deploy to GitHub Pages (no PAT needed)
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
-          publish_branch: gh-pages
-          user_name: github-actions
-          user_email: action@github.com
-
-      # 8️⃣ Send evaluation POST with retry
+      # ✅ 8️⃣ Send evaluation POST (moved before deployment)
       - name: Send evaluation POST with retry
         run: |
           EMAIL=$(jq -r '.email' request.json)
@@ -144,3 +134,13 @@ jobs:
 
           echo "Failed to notify evaluator after $ATTEMPTS attempts."
           exit 1
+
+      # 9️⃣ Deploy to GitHub Pages
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages
+          user_name: github-actions
+          user_email: action@github.com
