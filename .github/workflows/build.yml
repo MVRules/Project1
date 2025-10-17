@@ -30,17 +30,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout repo with full history
       - name: Checkout repo
         uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          fetch-depth: 0
 
+      # 2️⃣ Save request payload
       - name: Save request payload
         run: |
-          # Detect trigger type
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "{\"email\": \"${{ github.event.inputs.email }}\", \"secret\": \"${{ github.event.inputs.secret }}\", \"task\": \"${{ github.event.inputs.task }}\", \"round\": ${{ github.event.inputs.round }}, \"brief\": \"${{ github.event.inputs.brief }}\", \"evaluation_url\": \"${{ github.event.inputs.evaluation_url }}\"}" > request.json
           else
@@ -48,6 +46,7 @@ jobs:
           fi
           cat request.json
 
+      # 3️⃣ Verify secret
       - name: Verify secret
         run: |
           SECRET_REQ=$(jq -r '.secret' request.json)
@@ -57,28 +56,40 @@ jobs:
           fi
           echo "✅ Secret verified"
 
+      # 4️⃣ Setup Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Install dependencies
         run: npm install openai@^4.0.0
 
+      # 5️⃣ Run your generator script
       - name: Run OpenAI generator
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: node scripts/generate.js
 
-      - name: Commit & push generated files
+      # 6️⃣ Commit & push generated files using PAT
+      - name: Commit & push
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           git config user.name "github-actions"
           git config user.email "action@github.com"
           git add .
           git commit -m "Auto generate for round ${{ github.event.inputs.round }}" || echo "No changes to commit"
-          git push origin HEAD
+          git push https://$GH_PAT@github.com/${{ github.repository }} HEAD
 
+      # 7️⃣ Deploy to GitHub Pages
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.GH_PAT }}
           publish_dir: ./
 
+      # 8️⃣ Send evaluation POST with retry
       - name: Send evaluation POST with retry
         run: |
           EMAIL=$(jq -r '.email' request.json)
