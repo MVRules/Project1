@@ -1,0 +1,11 @@
+{
+  "name": "build-deploy-llm",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/handle_request.js"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2",
+    "openai": "^4.104.0"
+  }
+}
