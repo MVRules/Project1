@@ -82,12 +82,13 @@ jobs:
           git commit -m "Auto generate for round ${{ github.event.inputs.round }}" || echo "No changes to commit"
           git push https://$GH_PAT@github.com/${{ github.repository }} HEAD
 
-      # 7️⃣ Deploy to GitHub Pages
+      # 7️⃣ Deploy to GitHub Pages using PAT
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GH_PAT }}
           publish_dir: ./
+          publish_branch: gh-pages
 
       # 8️⃣ Send evaluation POST with retry
       - name: Send evaluation POST with retry
